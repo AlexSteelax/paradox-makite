@@ -12,8 +12,12 @@ namespace MakItE.Core.Tokenizer
         Variable,
         [Token(Category = "object", Description = "String")]
         String,
-        [Token(Category = "object", Description = "Value")]
-        Value,
+        [Token(Category = "object", Description = "Number")]
+        Number,
+        [Token(Category = "object", Description = "Date")]
+        Date,
+        [Token(Category = "object", Description = "Label")]
+        Label,
 
         [Token(Category = @"syntax", Description = "Value comparison operator")]
         ComparisonSign,

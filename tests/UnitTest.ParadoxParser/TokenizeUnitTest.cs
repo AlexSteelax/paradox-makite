@@ -1,4 +1,5 @@
 using MakItE.Core.Tokenizer;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace UnitTest.ParadoxParser
 {
@@ -76,7 +77,7 @@ namespace UnitTest.ParadoxParser
         [InlineData(".5.10%")]
         [InlineData(@"/SFX/Events/Themes/sfx_event_theme_type_corruption")]
         [InlineData(@"patron_nbg/p_ae_syrabane_nbg.dds")]
-        public void Value(string text)
+        public void Label(string text)
         {
             var tokens = TokenParser.Instance.TryTokenize(text);
 
@@ -85,7 +86,41 @@ namespace UnitTest.ParadoxParser
 
             var value = tokens.Value.ElementAt(0);
 
-            Assert.Equal(ParadoxToken.Value, value.Kind);
+            Assert.Equal(ParadoxToken.Label, value.Kind);
+            Assert.Equal(text, value.ToStringValue());
+        }
+
+        [Theory]
+        [InlineData("-0")]
+        [InlineData("-0.5")]
+        [InlineData("5.6")]
+        [InlineData(".8")]
+        public void Number(string text)
+        {
+            var tokens = TokenParser.Instance.TryTokenize(text);
+
+            Assert.True(tokens.HasValue);
+            Assert.Single(tokens.Value);
+
+            var value = tokens.Value.ElementAt(0);
+
+            Assert.Equal(ParadoxToken.Number, value.Kind);
+            Assert.Equal(text, value.ToStringValue());
+        }
+
+        [Theory]
+        [InlineData("999.5.6")]
+        [InlineData("00.00.00")]
+        public void Date(string text)
+        {
+            var tokens = TokenParser.Instance.TryTokenize(text);
+
+            Assert.True(tokens.HasValue);
+            Assert.Single(tokens.Value);
+
+            var value = tokens.Value.ElementAt(0);
+
+            Assert.Equal(ParadoxToken.Date, value.Kind);
             Assert.Equal(text, value.ToStringValue());
         }
 

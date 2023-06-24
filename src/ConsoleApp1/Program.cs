@@ -1,149 +1,163 @@
-﻿using System.Text;
-using System.Linq;
-using System.IO;
-using static System.Net.WebRequestMethods;
+﻿using MakItE.Core.Helpers;
+using MakItE.Core.Models.Common;
+using MakItE.Core.Parser;
+using MakItE.Core.Processors;
+using MakItE.Core.Processors.Configurations;
+using MakItE.Core.Serializer;
+using MakItE.Core.Services;
 using Superpower.Model;
-using System.Collections.Specialized;
-using System.Collections.Concurrent;
-using Superpower.Parsers;
-using MakItE.Core;
-using MakItE.Core.Tokenizer;
+using System.Runtime.InteropServices;
+using System.Runtime.Serialization.Formatters.Binary;
+using System.Text;
+using System.Xml.Linq;
 
 namespace ConsoleApp1
 {
     internal class Program
     {
-        static void Main(string[] args)
+        class ResourceData
         {
-            /*
-            var list = new List<IX>();
-
-            list.Add(new X());
-            list.Add(new Xx<int> { Value = 5 });
-
-            var x1 = list[0] as X;
-            var x2 = list[1] as Xx<int>;
-            var x3 = 0;
-            */
-            //JsonParser.Program.Main2();
-            /*
-            var text = @"
-# Events for handling the Feast activity
-@xz_12_x = ""123""
-@y = 123
-@z = -12.5
-namespace = ""xxx""
-test = 5
-test_my = {
-    hidden = yes
-    scope = combat_side
-    any_in_list = {
-		list = prisoners_of_war
-		OR = {
-			this = root.enemy_side.side_primary_participant
-			is_heir_of = root.enemy_side.side_primary_participant
-		}
-		troops_ratio <= 0.5
-		num_enemies_killed >= 10000
-		AND = {
-			percent_enemies_killed >= 75
-			combat = {
-				num_total_troops >= 20000
-			}
-		}
-        10 = {}
-	}
-}
-";
-            */
-            //var text = "@[cultural_maa_extra_ai_score + 20]";
-            var root = @"D:\SteamLibrary\steamapps\common\Crusader Kings III\game";
-            //var root = @"D:\SteamLibrary\steamapps\workshop\content\1158310\2887120253";
-            //var root = @"D:\SteamLibrary\steamapps\workshop\content\1158310\2920116721";
-            
-            var folders = new (string Dir, string Mask)[]
-            {
-                (@"common", "*.txt"),
-                (@"events", "*.txt"),
-                (@"gui", "*.gui")
-            };
-            
-            /*
-            var root = @"D:\\SteamLibrary\\steamapps\\common\\Stellaris";
-
-            var folders = new (string Dir, string Mask)[]
-            {
-                (@"common", "*.txt"),
-                (@"events", "*.txt"),
-                (@"interface", "*.gui")
-            };
-            */
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-
-            var result = new ConcurrentBag<(string Path, bool HasValue, string ErrorPosition)>();
-            
-            var files = folders.SelectMany(s => Directory.EnumerateFiles(Path.Combine(root, s.Dir), s.Mask, SearchOption.AllDirectories));
-            //files = new string[] { files.First() };
-
-            Parallel.ForEach(files, (filePath, state) =>
-            {
-                var text = ReadFile(filePath);
-                var relPath = Path.GetRelativePath(root, filePath);
-                /*
-                text = @"
-scope:x_y.10
-";
-         */       
-                var tokens = TokenParser.Instance.TryTokenize(text);
-
-                if (tokens.HasValue)
-                {
-                    result.Add((relPath, true, string.Empty));
-                }
-                else
-                {
-                    result.Add((relPath, false, tokens.ErrorPosition.ToString()));
-                }
-
-                //ParadoxParser2.Parse(tokens);
-                //var p = ParadoxParser2.TryParse(text, out object? value, out string error, out Position errorPosition);
-
-                //state.Break();
-            });
-
-            foreach(var item in result)
-            {
-                if (item.HasValue)
-                {
-                    //nothing
-                    //Console.WriteLine($"+ {item.Path}");
-                }
-                else
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"- {item.Path}");
-                    Console.WriteLine(item.ErrorPosition);
-                    Console.ForegroundColor = ConsoleColor.White;
-                }
-            }
-
-            watch.Stop();
-
-            Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"Execution time: {watch.ElapsedMilliseconds / 1000} sec");
-            Console.WriteLine($"Total files: {result.Count}");
-            Console.WriteLine("Press any key");
-            Console.ReadKey();
-            
+            public string? Code;
+            public string? Path;
+        }
+        class ResultData
+        {
+            public IEnumerable<IObject>? Nodes;
+            public string? Url;
         }
 
-		static string ReadFile(string filePath)
-		{
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
-            using var reader = new StreamReader(stream, Encoding.UTF8, true);
+        static async IAsyncEnumerable<ExecuteResult<ResourceData>> ProduceData()
+        {
+            IResource resource = new Ck3Resources();
 
-            return reader.ReadToEnd();
+            var files = resource.GetFiles();
+
+            foreach (var file in files)
+            {
+                //if (!file.EndsWith("fp2_achievements.txt")) continue;
+
+                var path = Path.Combine(resource.Root, file);
+
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
+                using var reader = new StreamReader(stream, Encoding.UTF8, true);
+
+                var code = await reader.ReadToEndAsync();
+
+                yield return ExecuteResult<ResourceData>.Create(new() { Code = code, Path = file }, true);
+            }
+        }
+        static ValueTask<ExecuteResult<ResultData>> ProcessHandler(ResourceData data)
+        {
+            var pstate = TokenListParser.TryParse(data.Code!, out IEnumerable<IObject>? result, out string? error, out Position errorPosition);
+
+            if (pstate)
+            {
+                var o = new ResultData { Nodes = result, Url = data.Path!.UrlNormalize() };
+                return ValueTask.FromResult(ExecuteResult<ResultData>.Create(o, Diagnostic.Create($"Thread: {Environment.CurrentManagedThreadId} File: {data.Path}")));
+            }
+                
+
+            return ValueTask.FromResult(ExecuteResult<ResultData>.Create(Diagnostic.Create($"Thread: {Environment.CurrentManagedThreadId} File: {data.Path}\n{error}", Microsoft.CodeAnalysis.DiagnosticSeverity.Error)));
+        }
+        static ValueTask LogHandler(Diagnostic diagnostic)
+        {
+            if (diagnostic.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                Console.ForegroundColor = ConsoleColor.Red;
+            else
+                Console.ForegroundColor = ConsoleColor.Green;
+            ///
+            if (diagnostic.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                Console.WriteLine(diagnostic.Description);
+            ///
+            return ValueTask.CompletedTask;
+        }
+        static async Task<ProcessResult<IEnumerable<ResultData>>> RunMakItE()
+        {
+            var result = await FileProcessor<ResourceData, ResultData>
+                .Create()
+                .ConfigureProducer(ProduceData)
+                .ConfigureProcessor(ProcessHandler)
+                .ConfigureLogger(LogHandler)
+                .RunAsync();
+
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine($"Totals: {result.Totals}");
+            Console.WriteLine($"Errors: {result.Errors}");
+            Console.WriteLine($"Execution time: {result.Elapsed.TotalSeconds} sec");
+
+            return result;
+        }
+
+        static async Task Main(string[] args)
+        {
+            /*
+            var file = "D:\\Development\\test_mod\\ClassLibrary1\\ClassLibrary1\\Class1.cs";
+            var result = EasyRoslyn
+                .CreateCSharpBuilder(OutputKind.DynamicallyLinkedLibrary)
+                .ConfigureReferences(s => s
+                    .UseNetStandard()
+                    .UseSystemRuntime()
+                    .UseReference(typeof(Console))
+                    .UseReference(typeof(Debugger)))
+                .ConfigureCompilationOptions(s => s
+                    .WithCurrentPlatform()
+                    .WithOptimizationLevel(OptimizationLevel.Debug))
+                .ConfigureEmitOptions(s => s
+                    .WithDebugInformationFormat(DebugInformationFormat.PortablePdb))
+                .ConfigureSources(s => s
+                    .FromFile(file))
+                .Build()
+                .TryLoad(out Assembly assembly);
+
+            dynamic instance = assembly.CreateInstance("ClassLibrary1.Class1");
+
+            //while (!System.Diagnostics.Debugger.IsAttached)
+            //{
+            //    Thread.Sleep(TimeSpan.FromSeconds(1)); //Or Task.Delay()
+            //}
+
+            Console.WriteLine("Debugger is attached!");
+            
+            instance.Print();
+            */
+
+            //for(var i = 0; i < 20; i++)
+            //{
+            //    Console.WriteLine($"Step {i}");
+                await RunMakItE().ConfigureAwait(false);
+            //}
+            /*
+            Console.WriteLine("Next 1");
+            var result = await RunMakItE().ConfigureAwait(false);
+            Console.WriteLine("Next 2");
+            Console.WriteLine("Press any key...");
+            _ = await RunMakItE().ConfigureAwait(false);
+            Console.WriteLine("Next 3");
+            Console.WriteLine("Press any key...");
+            _ = await RunMakItE().ConfigureAwait(false);
+            */
+            /*
+            var outDir = @"D:\test";
+
+            foreach (var data in result.Result!)
+            {
+                var file = Path.Combine(outDir, data.Url!);
+                var dir = Path.GetDirectoryName(file);
+
+
+                Directory.CreateDirectory(dir!);
+
+                using var stream = File.OpenWrite(file);
+
+                await PdxSerializer.SerializeToAsync<CK3Serializer>(stream, data.Nodes!);
+
+                await stream.FlushAsync();
+
+                stream.Close();
+            }
+            */
+            Console.WriteLine("Press any key...");
+            Console.ReadKey();
         }
     }
 }

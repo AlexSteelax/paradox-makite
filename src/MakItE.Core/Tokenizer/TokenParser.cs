@@ -21,21 +21,42 @@ namespace MakItE.Core.Tokenizer
 
         static TextParser<Unit> StringToken { get; } =
             from open in Character.In('"', '\'')
-            from content in Character.EqualTo('\\').IgnoreThen(Character.AnyChar).Value(Unit.Value).Try()
-                .Or(Character.Except(open).Value(Unit.Value))
+            from content in
+                Character.EqualTo('\\').IgnoreThen(Character.AnyChar).Value(Unit.Value).Try().Or(Character.Except(open).Value(Unit.Value))
                 .IgnoreMany()
             from close in Character.EqualTo(open)
             select Unit.Value;
 
-        static TextParser<Unit> ValueToken =>
+        static TextParser<Unit> LabelToken =>
             from context in Character.LetterOrDigit.Or(Character.In('_', '&', '-', '\'', '$', '.', '|', '*', ':', '%', '/')).IgnoreMany()
             select Unit.Value;
 
+        static TextParser<Unit> NumberToken =>
+            from main in
+                Character.EqualTo('-')
+                .IgnoreThen(Character.Digit.AtLeastOnce().Value(Unit.Value))
+                .IgnoreThen(Character.EqualTo('.').Optional())
+                .IgnoreThen(Character.Digit.IgnoreMany())
+                .Try()
+                .Or(
+                    Character.EqualTo('.')
+                    .IgnoreThen(Character.Digit.AtLeastOnce().Value(Unit.Value)))
+                .Or(
+                    Character.Digit.AtLeastOnce()
+                    .IgnoreThen(Character.EqualTo('.').Optional())
+                    .IgnoreThen(Character.Digit.IgnoreMany()))
+            from kind in Character.EqualTo('%').IgnoreMany()
+            select Unit.Value;
+
+        static TextParser<Unit> DateToken =>
+            Character.Digit.AtLeastOnce().IgnoreThen(Character.EqualTo('.')).Repeat(2).IgnoreThen(Character.Digit.AtLeastOnce().Value(Unit.Value));
+
         static TextParser<Unit> ComparisonToken =>
-            Span.EqualTo("==").Value(Unit.Value).Try().Or(Character.In('!', '>', '<').IgnoreThen(Character.EqualTo('=').Optional()).Value(Unit.Value));
+            Span.EqualTo("==").Value(Unit.Value).Try()
+            .Or(Span.EqualTo("!=").Value(Unit.Value))
+            .Or(Character.In('>', '<').IgnoreThen(Character.EqualTo('=').Optional().Value(Unit.Value)));
 
         static TokenParser() => Instance = new TokenizerBuilder<ParadoxToken>()
-
             //Ignore UTF-8 BOM symbols
             .Ignore(Character.In('\uFEFF', '\u200B'))
             .Ignore(Span.WhiteSpace)
@@ -53,7 +74,9 @@ namespace MakItE.Core.Tokenizer
             .Match(StringToken, ParadoxToken.String)
             .Match(ExpressionToken, ParadoxToken.Expression, requireDelimiters: true)
             .Match(VariableToken, ParadoxToken.Variable, requireDelimiters: true)
-            .Match(ValueToken, ParadoxToken.Value, requireDelimiters: true)
+            .Match(NumberToken, ParadoxToken.Number, requireDelimiters: true)
+            .Match(DateToken, ParadoxToken.Date, requireDelimiters: true)
+            .Match(LabelToken, ParadoxToken.Label, requireDelimiters: true)
 
             .Build();
 
